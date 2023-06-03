@@ -49,7 +49,7 @@ fn load_imdb_dataset(path: &str) -> Vec<Review> {
             sentiment: if record[1].to_string() == "positive" {true} else {false},
         };
         imdb_dataset.push(imdb_review);
-        if imdb_dataset.len() == 1000 {
+        if imdb_dataset.len() == 5000 {
             break;
         }
     }
@@ -70,8 +70,8 @@ fn build_vocab(dataset: &Vec<Review>) -> Vec<String> {
 
 fn build_co_occurrence_matrix(vocab: &Vec<String>, imdb_dataset: &Vec<Review>) -> Vec<Vec<f32>> {
     let word_to_index: HashMap<String, usize> = vocab.iter().enumerate().map(|(i, x)| (x.to_string(), i)).collect();
-    println!("{}", word_to_index["movie"]); // 356
-    println!("{}", word_to_index["good"]); // 464
+    // println!("{}", word_to_index["movie"]); // 356
+    // println!("{}", word_to_index["good"]); // 464
     let co_occurrence_window = 3;
     let mut co_occurrence_matrix = vec![vec![0.0; vocab.len()]; vocab.len()];
     for review in imdb_dataset {
@@ -93,19 +93,44 @@ fn build_co_occurrence_matrix(vocab: &Vec<String>, imdb_dataset: &Vec<Review>) -
     co_occurrence_matrix
 }
 
+fn pca(matrix: &mut Vec<Vec<f32>>) {
+    // Apply principle component analysis (PCA) on a matrix.
+
+    // Normalise data
+    for i in 0..matrix.len() {
+        let mut total = 0.0;
+        for j in 0..matrix[i].len() {
+            total += matrix[i][j];
+        }
+        let mean = total / matrix[i].len() as f32;
+        let mut dists_from_mean = 0.0;
+        for j in 0..matrix[i].len() {
+            dists_from_mean += f32::powi(matrix[i][j] - mean, 2);
+        }
+        let stdev = f32::powf(dists_from_mean / matrix[i].len() as f32, 0.5);
+
+        for j in 0..matrix[i].len() {
+            matrix[i][j] = (matrix[i][j] - mean) / stdev;
+        }
+    }
+
+    // Find covariance matrix
+    let mut covariance_matrix = vec![vec![0.0; matrix.len()]; matrix.len()];
+    for i in 0..matrix.len() {
+        for j in 0..matrix.len() {
+            let mut sum = 0.0;
+            for k in 0..matrix.len() {
+                sum += matrix[i][k] * matrix[j][k];
+            }
+            let covariance = sum / matrix.len() as f32;
+            covariance_matrix[i][j] = covariance;
+        }
+    }
+}
+
 fn main() {
     let imdb_dataset = load_imdb_dataset("imdb_dataset.csv");
     let vocab = build_vocab(&imdb_dataset);
-    let co_occurrence_matrix = build_co_occurrence_matrix(&vocab, &imdb_dataset);
-    let movie = co_occurrence_matrix[356].clone();
-    let good = co_occurrence_matrix[464].clone();
-
-    for (i, word) in vocab.iter().enumerate() {
-        if movie[i] > 0.0 {
-            println!("movie: {} {}", word, movie[i]);
-        }
-        if good[i] > 0.0 {
-            println!("good: {} {}", word, good[i]);
-        }
-    }
+    let mut co_occurrence_matrix = build_co_occurrence_matrix(&vocab, &imdb_dataset);
+    let reduced = pca(&mut co_occurrence_matrix);
 }
