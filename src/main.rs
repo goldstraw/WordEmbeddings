@@ -115,15 +115,17 @@ fn pca(matrix: &mut Vec<Vec<f32>>) {
     }
 
     // Find covariance matrix
-    let mut covariance_matrix = vec![vec![0.0; matrix.len()]; matrix.len()];
-    for i in 0..matrix.len() {
-        for j in 0..matrix.len() {
+    let matrix_len = matrix.len();
+    let mut covariance_matrix = vec![vec![0.0; matrix_len]; matrix_len];
+    for i in 0..matrix_len {
+        for j in 0..=i {
             let mut sum = 0.0;
-            for k in 0..matrix.len() {
+            for k in 0..matrix_len {
                 sum += matrix[i][k] * matrix[j][k];
             }
-            let covariance = sum / matrix.len() as f32;
+            let covariance = sum / matrix_len as f32;
             covariance_matrix[i][j] = covariance;
+            covariance_matrix[j][i] = covariance; // Covariance is symmetrical
         }
     }
 }
