@@ -1,8 +1,10 @@
 // https://towardsdatascience.com/a-one-stop-shop-for-principal-component-analysis-5582fb7e0a9c
+// https://builtin.com/data-science/step-step-explanation-principal-component-analysis
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use rand::Rng;
 
 struct Review {
     review: String,
@@ -53,7 +55,7 @@ fn load_imdb_dataset(path: &str) -> Vec<Review> {
             _sentiment: if record[1].to_string() == "positive" {true} else {false},
         };
         imdb_dataset.push(imdb_review);
-        if imdb_dataset.len() == 50000 {
+        if imdb_dataset.len() == 5000 {
             break;
         }
     }
@@ -109,6 +111,48 @@ fn build_co_occurrence_matrix(vocab: &Vec<String>, imdb_dataset: &Vec<Review>) -
         }
     }
     co_occurrence_matrix
+}
+
+fn power_iteration(cov: &Vec<Vec<f32>>, num_iterations: usize, num_eigenvectors: usize) -> Vec<(Vec<f32>, f32)>{
+    // Uses the power iteration algorithm to compute N eigenvector and eigenvalue pairs.
+
+    let mut eigens: Vec<(Vec<f32>, f32)> = Vec::new();
+
+    for _ in 0..num_eigenvectors {
+        // Generate random vector
+        let mut b_k: Vec<f32> = vec![0.0; cov.len()];
+        let mut rng = rand::thread_rng();
+        for i in 0..cov.len() {
+            b_k[i] = rng.gen();
+        }
+
+        for _ in 0..num_iterations {
+            // Calculate dot product of covariance matrix and b_k
+            let mut b_k1: Vec<f32> = vec![0.0; cov.len()];
+            for j in 0..cov.len() {
+                for k in 0..cov.len() {
+                    b_k1[j] += cov[j][k] * b_k[k]
+                }
+            }
+
+            // Calculate norm of result
+            let mut sq_sum = 0.0;
+            for j in 0..cov.len() {
+                sq_sum += f32::powi(b_k1[j], 2);
+            }
+            let norm = f32::powf(sq_sum, 0.5);
+
+            // Normalise result
+            for j in 0..cov.len() {
+                b_k[j] = b_k1[j] / norm;
+            }
+        }
+        eigens.push((b_k.clone(),0.0));
+
+
+    }
+
+    eigens
 }
 
 fn pca(matrix: &mut Vec<Vec<f32>>) {
@@ -172,9 +216,16 @@ fn pca(matrix: &mut Vec<Vec<f32>>) {
     for handle in handles {
         handle.join().unwrap();
     }
+
+    // Compute eigenvectors and eigenvalues
+    let cov_lock = covariance_matrix.lock().unwrap();
+    let num_iterations = 10;
+    let eigenvecs_and_vals = power_iteration(&cov_lock, num_iterations, 5);
 }
 
 fn main() {
+    let my_matrix = vec![vec![0.0,1.0], vec![-2.0,-3.0]];
+    println!("{:?}", power_iteration(&my_matrix, 10, 1));
     let imdb_dataset = load_imdb_dataset("imdb_dataset.csv");
     let vocab = build_vocab(&imdb_dataset);
     let mut co_occurrence_matrix = build_co_occurrence_matrix(&vocab, &imdb_dataset);
