@@ -4,7 +4,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::fs::File;
+use std::io::prelude::*;
 use rand::Rng;
+use serde::{Serialize, Deserialize};
 
 struct Review {
     review: String,
@@ -83,9 +86,7 @@ fn build_vocab(dataset: &Vec<Review>) -> Vec<String> {
 
 fn build_co_occurrence_matrix(vocab: &Vec<String>, imdb_dataset: &Vec<Review>) -> Vec<Vec<f32>> {
     let word_to_index: HashMap<String, usize> = vocab.iter().enumerate().map(|(i, x)| (x.to_string(), i)).collect();
-    // println!("{}", word_to_index["movie"]); // 356
-    // println!("{}", word_to_index["good"]); // 464
-    let co_occurrence_window = 3;
+    let co_occurrence_window = 4;
     let mut co_occurrence_matrix = vec![vec![0.0; vocab.len()]; vocab.len()];
     for review in imdb_dataset {
         let words = review.review.split_whitespace();
@@ -113,49 +114,67 @@ fn build_co_occurrence_matrix(vocab: &Vec<String>, imdb_dataset: &Vec<Review>) -
     co_occurrence_matrix
 }
 
-fn power_iteration(cov: &Vec<Vec<f32>>, num_iterations: usize, num_eigenvectors: usize) -> Vec<(Vec<f32>, f32)>{
-    // Uses the power iteration algorithm to compute N eigenvector and eigenvalue pairs.
+fn power_iteration(cov: &mut Vec<Vec<f32>>, num_iterations: usize, num_eigenvectors: usize) -> Vec<Vec<f32>>{
+    // Uses the power iteration algorithm to compute N eigenvectors.
 
-    let mut eigens: Vec<(Vec<f32>, f32)> = Vec::new();
+    let mut eigenvectors: Vec<Vec<f32>> = Vec::new();
 
     for _ in 0..num_eigenvectors {
         // Generate random vector
-        let mut b_k: Vec<f32> = vec![0.0; cov.len()];
+        let mut eigenvector: Vec<f32> = vec![0.0; cov.len()];
         let mut rng = rand::thread_rng();
         for i in 0..cov.len() {
-            b_k[i] = rng.gen();
+            eigenvector[i] = rng.gen();
         }
 
         for _ in 0..num_iterations {
-            // Calculate dot product of covariance matrix and b_k
-            let mut b_k1: Vec<f32> = vec![0.0; cov.len()];
+            // Calculate dot product of covariance matrix and eigenvector
+            let mut new_eigenvector: Vec<f32> = vec![0.0; cov.len()];
             for j in 0..cov.len() {
                 for k in 0..cov.len() {
-                    b_k1[j] += cov[j][k] * b_k[k]
+                    new_eigenvector[j] += cov[j][k] * eigenvector[k]
                 }
             }
 
             // Calculate norm of result
             let mut sq_sum = 0.0;
             for j in 0..cov.len() {
-                sq_sum += f32::powi(b_k1[j], 2);
+                sq_sum += f32::powi(new_eigenvector[j], 2);
             }
             let norm = f32::powf(sq_sum, 0.5);
 
             // Normalise result
             for j in 0..cov.len() {
-                b_k[j] = b_k1[j] / norm;
+                eigenvector[j] = new_eigenvector[j] / norm;
             }
         }
-        eigens.push((b_k.clone(),0.0));
+        // Calculate eigenvalue from eigenvector
+        let mut temp = vec![0.0; cov.len()];
+        for i in 0..cov.len() {
+            for j in 0..cov.len() {
+                temp[i] += cov[i][j] * eigenvector[j]
+            }
+        }
 
+        let mut eigenvalue = 0.0;
+        for i in 0..cov.len() {
+            eigenvalue += eigenvector[i] * temp[i];
+        }
 
+        eigenvectors.push(eigenvector.clone());
+
+        // Redirect matrix to find next eigenvector
+        for i in 0..cov.len() {
+            for j in 0..cov.len() {
+                cov[i][j] -= eigenvalue * eigenvector[i] * eigenvector[j];
+            }
+        }
     }
 
-    eigens
+    eigenvectors
 }
 
-fn pca(matrix: &mut Vec<Vec<f32>>) {
+fn pca(mut matrix: Vec<Vec<f32>>, num_components: usize) -> Vec<Vec<f32>> {
     println!("{}", matrix.len());
     // Apply principle component analysis (PCA) on a matrix.
 
@@ -218,16 +237,40 @@ fn pca(matrix: &mut Vec<Vec<f32>>) {
     }
 
     // Compute eigenvectors and eigenvalues
-    let cov_lock = covariance_matrix.lock().unwrap();
-    let num_iterations = 10;
-    let eigenvecs_and_vals = power_iteration(&cov_lock, num_iterations, 5);
+    let mut cov_lock = covariance_matrix.lock().unwrap();
+    let eigenvectors = power_iteration(&mut cov_lock, 10, num_components);
+
+    let mut reduced: Vec<Vec<f32>> = Vec::new();
+    for i in 0..matrix.len() {
+        let mut embedding: Vec<f32> = Vec::new();
+        for j in 0..num_components {
+            let mut component: f32 = 0.0;
+            for k in 0..matrix.len() {
+                component += matrix[i][k] * eigenvectors[j][k]
+            }
+            embedding.push(component);
+        }
+        reduced.push(embedding);
+    }
+
+    reduced
+}
+
+#[derive(Serialize, Deserialize)]
+struct WordEmbeddings {
+    data: HashMap<String, Vec<f32>>
 }
 
 fn main() {
-    let my_matrix = vec![vec![0.0,1.0], vec![-2.0,-3.0]];
-    println!("{:?}", power_iteration(&my_matrix, 10, 1));
     let imdb_dataset = load_imdb_dataset("imdb_dataset.csv");
     let vocab = build_vocab(&imdb_dataset);
-    let mut co_occurrence_matrix = build_co_occurrence_matrix(&vocab, &imdb_dataset);
-    let _reduced = pca(&mut co_occurrence_matrix);
+    let co_occurrence_matrix = build_co_occurrence_matrix(&vocab, &imdb_dataset);
+    let reduced = pca(co_occurrence_matrix, 200);
+    let mut word_embeddings = WordEmbeddings {data: HashMap::new()};
+    for i in 0..vocab.len() {
+        word_embeddings.data.insert(vocab[i].clone(), reduced[i].clone());
+    }
+    let serialized = serde_json::to_string(&word_embeddings).unwrap();
+    let mut file = File::create("data.json").expect("Unable to create file");
+    file.write_all(serialized.as_bytes()).expect("Unable to write");
 }
